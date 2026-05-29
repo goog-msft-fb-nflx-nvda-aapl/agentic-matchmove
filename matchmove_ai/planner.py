@@ -11,7 +11,7 @@ def make_plan(context: dict, config: dict) -> dict:
     if duration <= 0:
         duration = max(1.0, len(context.get("frames", [])) * float(config.get("keyframe_stride_seconds", 1.0)))
 
-    tracking = config.get("tracking", {})
+    tracking = _tracking_config(context, config)
     audio = config.get("audio", {})
     return {
         "version": 1,
@@ -80,6 +80,16 @@ def _choose_screen_path(context: dict, cgi: dict) -> list[list[float]]:
     if center_x < 0.5:
         return [[0.65, y], [0.50, y - 0.08], [0.28, y]]
     return [[0.25, y], [0.48, y - 0.08], [0.72, y]]
+
+
+def _tracking_config(context: dict, config: dict) -> dict:
+    configured = config.get("tracking", {})
+    context_tracking = context.get("tracking", {})
+    if configured.get("source"):
+        return configured
+    if context_tracking.get("source"):
+        return context_tracking
+    return configured
 
 
 def _summarize_constraints(context: dict) -> dict:
