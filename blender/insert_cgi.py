@@ -347,25 +347,60 @@ def make_kitsune_fox(obj_def: dict, suffix: str = "") -> bpy.types.Object:
     return body
 
 
+_GEOMETRY_REGISTRY: dict[str, object] = {}  # populated after all functions defined
+
+
 def make_cgi_object(obj_def: dict, suffix: str = "") -> bpy.types.Object:
-    """Dispatch based on label first (character semantics), then asset type."""
-    label = obj_def.get("label", "").lower()
-    asset = obj_def.get("asset", "procedural_robot")
+    """
+    Dispatch to a geometry builder using the plan's geometry_function field.
+    Falls back to embedding similarity against the geometry catalog if the
+    field is missing — no hardcoded keywords anywhere.
+    """
+    # Primary: story plan explicitly names the function (set by Qwen story planner)
+    fn_name = obj_def.get("geometry_function", "")
+    if fn_name and fn_name in _GEOMETRY_REGISTRY:
+        return _GEOMETRY_REGISTRY[fn_name](obj_def, suffix)
 
-    # Character-type labels override asset field — a "holographic fox" is a fox, not a panel
-    if any(k in label for k in ("fox", "kitsune", "wolf", "cat", "bear", "spirit", "creature")):
-        return make_kitsune_fox(obj_def, suffix)
-    if any(k in label for k in ("lantern", "drone", "orb", "balloon")):
-        return make_lantern_drone(obj_def, suffix)
-    if any(k in label for k in ("billboard", "panel", "sign", "display")) and "holo" in label:
-        return make_hologram_panel(obj_def, suffix)
+    # Fallback: semantic similarity between character description and catalog
+    fn_name = _semantic_match(
+        f"{obj_def.get('label', '')} — {obj_def.get('story_role', '')}"
+    )
+    return _GEOMETRY_REGISTRY.get(fn_name, make_robot)(obj_def, suffix)
 
-    # Fall back to asset field
-    if asset == "lantern_drone":
-        return make_lantern_drone(obj_def, suffix)
-    if asset == "hologram_panel":
-        return make_hologram_panel(obj_def, suffix)
-    return make_robot(obj_def, suffix)
+
+def _semantic_match(query: str) -> str:
+    """
+    Find the best geometry function for a character description using
+    sentence-transformer cosine similarity. No keywords — generalises to
+    any new character as long as it exists in the catalog.
+    Falls back to 'make_robot' if the library is unavailable.
+    """
+    try:
+        import sys, os
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from geometry_catalog import CATALOG
+        from sentence_transformers import SentenceTransformer, util
+
+        model = SentenceTransformer("all-MiniLM-L6-v2")
+        q_emb = model.encode(query, convert_to_tensor=True)
+        best_fn, best_score = "make_robot", -1.0
+        for fn_name, info in CATALOG.items():
+            score = float(util.cos_sim(q_emb, model.encode(info["description"],
+                                                            convert_to_tensor=True)))
+            if score > best_score:
+                best_score, best_fn = score, fn_name
+        return best_fn
+    except Exception:
+        return "make_robot"
+
+
+# Populate registry after all builders are defined
+_GEOMETRY_REGISTRY.update({
+    "make_kitsune_fox": make_kitsune_fox,
+    "make_lantern_drone": make_lantern_drone,
+    "make_robot": make_robot,
+    "make_hologram_panel": make_hologram_panel,
+})
 
 
 # ---------------------------------------------------------------------------
