@@ -19,6 +19,11 @@ def main(argv: list[str] | None = None) -> int:
     prepare.add_argument("--workdir", default="work")
     prepare.add_argument("--config", default="config.json")
 
+    story = sub.add_parser("story", help="Call LLM to generate multi-object CGI story plan")
+    story.add_argument("--workdir", default="work")
+    story.add_argument("--model", default="claude-sonnet-4-6")
+    story.add_argument("--api-key", default="")
+
     plan = sub.add_parser("plan", help="Create CGI insertion plan from perception context")
     plan.add_argument("--workdir", default="work")
     plan.add_argument("--config", default="config.json")
@@ -28,26 +33,40 @@ def main(argv: list[str] | None = None) -> int:
     render.add_argument("--config", default="config.json")
     render.add_argument("--blender", default="blender")
     render.add_argument("--output", default="result.mp4")
+    render.add_argument("--max-duration", type=float, default=0.0,
+                        help="Clamp render to this many seconds (0 = full video)")
+    render.add_argument("--samples", type=int, default=0,
+                        help="Override render samples (0 = use plan default)")
 
-    qa = sub.add_parser("qa", help="Sample rendered video and write QA prompt/report")
+    qa = sub.add_parser("qa", help="Sample rendered video and write QA report")
     qa.add_argument("--video", required=True)
     qa.add_argument("--workdir", default="work")
     qa.add_argument("--config", default="config.json")
 
     args = parser.parse_args(argv)
-    config = read_json(args.config)
     workdir = Path(args.workdir)
     workdir.mkdir(parents=True, exist_ok=True)
 
     if args.command == "prepare":
+        config = read_json(args.config)
         context = build_context(args.video, workdir, config)
         write_json(workdir / "perception_context.json", context)
         print(workdir / "perception_context.json")
         return 0
 
+    if args.command == "story":
+        script = Path(__file__).resolve().parent.parent / "scripts" / "llm_story_planner.py"
+        cmd = ["python3", str(script), "--workdir", str(workdir), "--model", args.model]
+        if args.api_key:
+            cmd += ["--api-key", args.api_key]
+        subprocess.run(cmd, check=True)
+        return 0
+
     if args.command == "plan":
+        config = read_json(args.config)
         context = read_json(workdir / "perception_context.json")
-        cgi_plan = make_plan(context, config)
+        story_plan = _maybe_read(workdir / "story_plan.json")
+        cgi_plan = make_plan(context, config, story_plan=story_plan)
         write_json(workdir / "cgi_plan.json", cgi_plan)
         print(workdir / "cgi_plan.json")
         return 0
@@ -59,20 +78,21 @@ def main(argv: list[str] | None = None) -> int:
         cmd = [
             args.blender,
             "--background",
-            "--python",
-            str(script),
+            "--python", str(script),
             "--",
-            "--manifest",
-            str(manifest),
-            "--plan",
-            str(cgi_plan),
-            "--output",
-            args.output,
+            "--manifest", str(manifest),
+            "--plan", str(cgi_plan),
+            "--output", args.output,
         ]
+        if args.max_duration > 0:
+            cmd += ["--max-duration", str(args.max_duration)]
+        if args.samples > 0:
+            cmd += ["--samples", str(args.samples)]
         subprocess.run(cmd, check=True)
         return 0
 
     if args.command == "qa":
+        config = read_json(args.config)
         report = qa_report(args.video, workdir, config)
         write_json(workdir / "qa_report.json", report)
         print(workdir / "qa_report.json")
@@ -81,6 +101,11 @@ def main(argv: list[str] | None = None) -> int:
     return 2
 
 
+def _maybe_read(path: Path) -> dict | None:
+    if path.exists():
+        return read_json(path)
+    return None
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
-

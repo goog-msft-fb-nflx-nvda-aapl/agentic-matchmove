@@ -4,7 +4,7 @@ import math
 from statistics import median
 
 
-def make_plan(context: dict, config: dict) -> dict:
+def make_plan(context: dict, config: dict, story_plan: dict | None = None) -> dict:
     video = context["video"]
     cgi_cfg = config.get("cgi", {})
     vlm = _extract_vlm_suggestion(context)
@@ -26,8 +26,17 @@ def make_plan(context: dict, config: dict) -> dict:
     tracking = _tracking_config(context, config)
     audio = config.get("audio", {})
 
-    return {
-        "version": 1,
+    plan: dict = {"version": 2 if story_plan else 1}
+
+    # Embed full multi-object story if available
+    if story_plan and story_plan.get("objects"):
+        plan["narrative"] = story_plan.get("narrative", intent)
+        plan["objects"] = story_plan["objects"]
+        # Stamp duration into each object's animation block
+        for obj in plan["objects"]:
+            obj.setdefault("animation", {})["duration_seconds"] = duration
+
+    plan.update({
         "intent": intent,
         "asset": asset,
         "tracking": {
@@ -60,7 +69,8 @@ def make_plan(context: dict, config: dict) -> dict:
         },
         "constraints": _summarize_constraints(context),
         "qa_expectations": config.get("qa", {}),
-    }
+    })
+    return plan
 
 
 # ---------------------------------------------------------------------------
