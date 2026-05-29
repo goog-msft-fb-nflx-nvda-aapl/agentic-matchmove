@@ -350,18 +350,80 @@ def make_kitsune_fox(obj_def: dict, suffix: str = "") -> bpy.types.Object:
 _GEOMETRY_REGISTRY: dict[str, object] = {}  # populated after all functions defined
 
 
+def import_glb(glb_path: str, obj_def: dict, suffix: str = "") -> bpy.types.Object | None:
+    """
+    Import a GLB asset from Objaverse (or any source) into the scene.
+    Normalises scale, applies emission tint, returns the root object.
+    Returns None if import fails.
+    """
+    try:
+        before = set(bpy.data.objects.keys())
+        bpy.ops.import_scene.gltf(filepath=glb_path)
+        new_objs = [bpy.data.objects[n] for n in bpy.data.objects.keys() if n not in before]
+        if not new_objs:
+            return None
+
+        # Find root (object with no parent among the new imports)
+        roots = [o for o in new_objs if o.parent not in new_objs]
+        root = roots[0] if roots else new_objs[0]
+        root.name = f"CGI_asset_{suffix}"
+
+        # Normalise to unit bounding box then apply story scale
+        all_verts = []
+        for o in new_objs:
+            if o.type == "MESH":
+                for v in o.data.vertices:
+                    all_verts.append(o.matrix_world @ v.co)
+        if all_verts:
+            from mathutils import Vector
+            xs = [v.x for v in all_verts]
+            ys = [v.y for v in all_verts]
+            zs = [v.z for v in all_verts]
+            extent = max(max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs)) or 1.0
+            norm_scale = 1.0 / extent
+            root.scale = (norm_scale, norm_scale, norm_scale)
+            bpy.ops.object.select_all(action="DESELECT")
+            root.select_set(True)
+            bpy.context.view_layer.objects.active = root
+            bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="BOUNDS")
+            root.location = (0, 0, 0)
+
+        # Add emissive tint overlay so the imported asset glows in the scene
+        color = obj_def.get("appearance", {}).get("color", [0.9, 0.8, 0.3])
+        emission = obj_def.get("appearance", {}).get("emission_strength", 1.5)
+        tint_mat = make_material(f"asset_tint{suffix}", color, emission * 0.6)
+        for o in new_objs:
+            if o.type == "MESH" and not o.data.materials:
+                o.data.materials.append(tint_mat)
+
+        return root
+    except Exception as e:
+        print(f"GLB import failed ({glb_path}): {e}")
+        return None
+
+
 def make_cgi_object(obj_def: dict, suffix: str = "") -> bpy.types.Object:
     """
-    Dispatch to a geometry builder using the plan's geometry_function field.
-    Falls back to embedding similarity against the geometry catalog if the
-    field is missing — no hardcoded keywords anywhere.
+    Asset acquisition priority:
+      1. GLB from Objaverse (via asset_manifest.json) — real geometry, no hardcoding
+      2. Semantic CLIP fallback to procedural geometry — generalises to new objects
+         via sentence-transformer cosine similarity against the geometry catalog
+    No keywords. No hardcoded dispatch.
     """
-    # Primary: story plan explicitly names the function (set by Qwen story planner)
+    # 1 — Try real GLB asset from asset_manifest
+    glb_path = obj_def.get("glb_path", "")
+    if glb_path and Path(glb_path).exists():
+        print(f"Importing GLB asset: {glb_path}")
+        obj = import_glb(glb_path, obj_def, suffix)
+        if obj is not None:
+            return obj
+        print("GLB import failed — falling back to semantic procedural dispatch")
+
+    # 2 — Semantic dispatch: story plan names the function, or CLIP picks it
     fn_name = obj_def.get("geometry_function", "")
     if fn_name and fn_name in _GEOMETRY_REGISTRY:
         return _GEOMETRY_REGISTRY[fn_name](obj_def, suffix)
 
-    # Fallback: semantic similarity between character description and catalog
     fn_name = _semantic_match(
         f"{obj_def.get('label', '')} — {obj_def.get('story_role', '')}"
     )

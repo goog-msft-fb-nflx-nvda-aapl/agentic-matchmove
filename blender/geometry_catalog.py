@@ -1,15 +1,16 @@
 """
-Geometry catalog for semantic CGI dispatch.
+Geometry catalog: procedural fallback library for CGI dispatch.
 
-Each entry describes what the geometry looks like in natural language.
-The story planner reads this catalog and picks the best function for
-each character. At render time, the plan's geometry_function field is
-called directly — no keyword matching, no hardcoded labels.
+PRIMARY path: CLIP search → Objaverse GLB → Blender import (asset_search.py)
+FALLBACK path: CLIP text similarity → geometry_function here → procedural mesh
 
-To add a new object type:
+Each entry has a rich semantic description used for CLIP cosine similarity.
+The story planner also reads this catalog to know what procedural shapes exist.
+
+To add a new procedural fallback:
   1. Write make_<name>(obj_def, suffix) in insert_cgi.py
-  2. Add an entry here with a rich semantic description
-  3. Done — the planner will discover and use it automatically.
+  2. Add an entry here with a rich natural-language description
+  3. No keywords, no hardcoding — CLIP embedding handles all future queries.
 """
 
 CATALOG: dict[str, dict] = {

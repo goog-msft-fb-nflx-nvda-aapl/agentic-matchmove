@@ -19,10 +19,14 @@ def main(argv: list[str] | None = None) -> int:
     prepare.add_argument("--workdir", default="work")
     prepare.add_argument("--config", default="config.json")
 
-    story = sub.add_parser("story", help="Call LLM to generate multi-object CGI story plan")
+    story = sub.add_parser("story", help="Call Qwen to generate multi-object CGI story plan")
     story.add_argument("--workdir", default="work")
-    story.add_argument("--model", default="claude-sonnet-4-6")
-    story.add_argument("--api-key", default="")
+    story.add_argument("--model", default="Qwen/Qwen2.5-VL-7B-Instruct")
+
+    search = sub.add_parser("search", help="CLIP semantic search for 3D assets on Objaverse")
+    search.add_argument("--workdir", default="work")
+    search.add_argument("--top-cats", type=int, default=4)
+    search.add_argument("--per-cat", type=int, default=3)
 
     plan = sub.add_parser("plan", help="Create CGI insertion plan from perception context")
     plan.add_argument("--workdir", default="work")
@@ -58,6 +62,29 @@ def main(argv: list[str] | None = None) -> int:
         script = Path(__file__).resolve().parent.parent / "scripts" / "qwen_story_planner.py"
         cmd = ["python3", str(script), "--workdir", str(workdir), "--model", args.model]
         subprocess.run(cmd, check=True)
+        return 0
+
+    if args.command == "search":
+        script = Path(__file__).resolve().parent.parent / "scripts" / "asset_search.py"
+        cmd = [
+            "python3", str(script),
+            "--workdir", str(workdir),
+            "--story-plan", str(workdir / "story_plan.json"),
+            "--top-cats", str(args.top_cats),
+            "--per-cat", str(args.per_cat),
+        ]
+        subprocess.run(cmd, check=True)
+        # Merge glb_path into story_plan objects so the render step picks them up
+        manifest_path = workdir / "asset_manifest.json"
+        story_path = workdir / "story_plan.json"
+        if manifest_path.exists() and story_path.exists():
+            manifest = read_json(manifest_path)
+            story = read_json(story_path)
+            for obj in story.get("objects", []):
+                entry = manifest.get(obj.get("id", ""), {})
+                obj["glb_path"] = entry.get("glb_path")  # None if not found
+            write_json(story_path, story)
+            print(f"GLB paths merged into {story_path}")
         return 0
 
     if args.command == "plan":
