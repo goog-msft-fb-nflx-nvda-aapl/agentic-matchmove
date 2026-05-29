@@ -96,6 +96,18 @@ Direct Blender invocation:
 /path/to/blender --background --python blender/insert_cgi.py -- --manifest work/perception_context.json --plan work/cgi_plan.json --output result.mp4
 ```
 
+On the reference GPU-server setup, Blender is installed as:
+
+```bash
+/home/jtan/matchmove_ai/tools/blender/blender
+```
+
+The recommended Python runtime there is:
+
+```bash
+/home/jtan/miniconda3/envs/cv_hw3/bin/python
+```
+
 ## Perception Context
 
 The pipeline expects normalized context at `work/perception_context.json`. A SAM2/Grounded-SAM2/VLM pipeline can export:
@@ -144,4 +156,3 @@ Suggested repository name:
 ```text
 goog-msft-fb-nflx-nvda-aapl/agentic-matchmove
 ```
-
