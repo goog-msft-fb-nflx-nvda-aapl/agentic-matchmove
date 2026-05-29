@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+work/
+data/
+result.mp4
+description.md

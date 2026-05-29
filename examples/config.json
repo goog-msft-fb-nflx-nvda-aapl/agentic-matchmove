@@ -1,0 +1,42 @@
+{
+  "project_name": "agentic_matchmove",
+  "max_video_seconds": 60,
+  "keyframe_stride_seconds": 1.0,
+  "perception": {
+    "backend": "manual_or_external_json",
+    "external_json": null,
+    "target_prompts": [
+      "person",
+      "floor",
+      "table",
+      "wall",
+      "chair",
+      "open space"
+    ]
+  },
+  "tracking": {
+    "source": null,
+    "camera_poses_path": null,
+    "blender_tracking_file": null
+  },
+  "cgi": {
+    "asset": "procedural_robot",
+    "story_intent": "A small glowing robot enters the scene, looks around, avoids foreground objects, and moves across the floor.",
+    "preferred_screen_path": [
+      [0.25, 0.75],
+      [0.50, 0.62],
+      [0.72, 0.70]
+    ],
+    "scale": 0.55,
+    "color": [0.1, 0.55, 1.0],
+    "emission_strength": 0.8
+  },
+  "audio": {
+    "music_path": null,
+    "sound_effects": []
+  },
+  "qa": {
+    "expected_inserted_object": "small glowing robot",
+    "min_visible_frames_ratio": 0.65
+  }
+}
