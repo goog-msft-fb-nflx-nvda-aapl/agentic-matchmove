@@ -47,6 +47,15 @@ def setup_scene(plan: dict, samples: int, max_duration: float) -> None:
     bpy.context.scene.cycles.samples = samples
     bpy.context.scene.view_settings.view_transform = "Filmic"
     bpy.context.scene.view_settings.look = "Medium High Contrast"
+    try:
+        cycles_prefs = bpy.context.preferences.addons["cycles"].preferences
+        cycles_prefs.compute_device_type = "CUDA"
+        cycles_prefs.get_devices()
+        for device in cycles_prefs.devices:
+            device.use = True
+        bpy.context.scene.cycles.device = "GPU"
+    except Exception:
+        pass
 
 
 def make_camera(video_path: str) -> bpy.types.Object:
