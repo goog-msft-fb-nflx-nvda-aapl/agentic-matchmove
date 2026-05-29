@@ -149,6 +149,51 @@ Return JSON matching this schema:
 """
 
 
+def _diversify_paths(objects: list[dict]) -> list[dict]:
+    """
+    Post-process: if any two objects share a similar x-centroid (within 0.2),
+    spread them into distinct horizontal thirds of the screen so they don't
+    overlap. This is a safety net — ideally Qwen does this from the spatial zones.
+    """
+    if len(objects) < 2:
+        return objects
+    n = len(objects)
+    # Compute each object's x-centroid
+    centroids = []
+    for obj in objects:
+        path = obj.get("screen_path", [[0.5, 0.75]])
+        cx = sum(p[0] for p in path) / len(path)
+        centroids.append(cx)
+
+    # Check if any two are too close (within 0.20)
+    too_close = any(
+        abs(centroids[i] - centroids[j]) < 0.20
+        for i in range(n) for j in range(i + 1, n)
+    )
+    if not too_close:
+        return objects  # already diverse, leave as-is
+
+    # Assign each object its own x-band: [i/n … (i+1)/n]
+    for i, obj in enumerate(objects):
+        x_lo = i / n + 0.04
+        x_hi = (i + 1) / n - 0.04
+        path = obj.get("screen_path", [])
+        if not path:
+            continue
+        # Remap existing x values into the assigned band
+        orig_xs = [p[0] for p in path]
+        ox_min, ox_max = min(orig_xs), max(orig_xs)
+        ox_span = max(ox_max - ox_min, 0.01)
+        new_path = []
+        for x, y in path:
+            nx = x_lo + (x - ox_min) / ox_span * (x_hi - x_lo)
+            new_path.append([round(min(x_hi, max(x_lo, nx)), 3), y])
+        obj["screen_path"] = new_path
+        obj["animation"]["screen_path"] = new_path
+
+    return objects
+
+
 def _normalise(obj: dict, i: int, video: dict) -> dict:
     """Ensure every required field exists with sensible defaults."""
     obj.setdefault("id", f"obj_{i}")
@@ -248,11 +293,7 @@ def main() -> int:
 
     story["objects"] = [_normalise(obj, i, video)
                         for i, obj in enumerate(story["objects"])]
-
-    # Verify no two objects have identical paths
-    paths = [str(o["screen_path"]) for o in story["objects"]]
-    if len(set(paths)) < len(paths):
-        print("WARNING: two objects share identical paths — Qwen may not have diversified routes.")
+    story["objects"] = _diversify_paths(story["objects"])
 
     out = work / "story_plan.json"
     out.write_text(json.dumps(story, indent=2) + "\n", encoding="utf-8")

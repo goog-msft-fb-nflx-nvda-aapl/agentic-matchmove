@@ -352,49 +352,63 @@ _GEOMETRY_REGISTRY: dict[str, object] = {}  # populated after all functions defi
 
 def import_glb(glb_path: str, obj_def: dict, suffix: str = "") -> bpy.types.Object | None:
     """
-    Import a GLB asset from Objaverse (or any source) into the scene.
-    Normalises scale, applies emission tint, returns the root object.
-    Returns None if import fails.
+    Import a GLB from Objaverse, normalise to a unit bounding box (baked into
+    vertices so animate_object's scale= doesn't undo the normalisation), then
+    replace ALL materials with an emissive colour tint so the asset glows.
     """
     try:
         before = set(bpy.data.objects.keys())
         bpy.ops.import_scene.gltf(filepath=glb_path)
-        new_objs = [bpy.data.objects[n] for n in bpy.data.objects.keys() if n not in before]
+        new_objs = [bpy.data.objects[n] for n in bpy.data.objects.keys()
+                    if n not in before]
         if not new_objs:
             return None
 
-        # Find root (object with no parent among the new imports)
         roots = [o for o in new_objs if o.parent not in new_objs]
         root = roots[0] if roots else new_objs[0]
         root.name = f"CGI_asset_{suffix}"
 
-        # Normalise to unit bounding box then apply story scale
+        # ── Step 1: compute world-space bounding box ─────────────────────────
         all_verts = []
         for o in new_objs:
             if o.type == "MESH":
                 for v in o.data.vertices:
                     all_verts.append(o.matrix_world @ v.co)
+
         if all_verts:
-            from mathutils import Vector
             xs = [v.x for v in all_verts]
             ys = [v.y for v in all_verts]
             zs = [v.z for v in all_verts]
-            extent = max(max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs)) or 1.0
+            extent = max(
+                max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs)
+            ) or 1.0
             norm_scale = 1.0 / extent
+
+            # Apply normalisation to root then BAKE it into vertices.
+            # This is critical: if we leave it as a scale transform,
+            # animate_object's obj.scale=(s,s,s) will overwrite it and the
+            # object reverts to its original size in world units.
             root.scale = (norm_scale, norm_scale, norm_scale)
             bpy.ops.object.select_all(action="DESELECT")
-            root.select_set(True)
+            for o in new_objs:
+                o.select_set(True)
             bpy.context.view_layer.objects.active = root
+            bpy.ops.object.transform_apply(scale=True)  # bake scale → vertices
+
+            # Centre origin
             bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="BOUNDS")
             root.location = (0, 0, 0)
 
-        # Add emissive tint overlay so the imported asset glows in the scene
+        # ── Step 2: replace ALL materials with emissive tint ─────────────────
+        # GLB materials are often white/grey. We override every slot so the
+        # imported asset gets the story plan colour and glows in the scene.
         color = obj_def.get("appearance", {}).get("color", [0.9, 0.8, 0.3])
-        emission = obj_def.get("appearance", {}).get("emission_strength", 1.5)
-        tint_mat = make_material(f"asset_tint{suffix}", color, emission * 0.6)
+        emission = obj_def.get("appearance", {}).get("emission_strength", 2.0)
+        tint_mat = make_material(f"asset_tint{suffix}", color, emission)
         for o in new_objs:
-            if o.type == "MESH" and not o.data.materials:
-                o.data.materials.append(tint_mat)
+            if o.type == "MESH":
+                o.data.materials.clear()          # remove original materials
+                o.data.materials.append(tint_mat) # apply emissive tint
 
         return root
     except Exception as e:
