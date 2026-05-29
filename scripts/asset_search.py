@@ -229,11 +229,16 @@ def main() -> int:
 
     manifest: dict[str, dict] = {}
     for obj in objects:
+        # Use visual_description as primary query — richer than label alone
+        query_text = (
+            obj.get("visual_description")
+            or f"{obj.get('label', '')} {obj.get('story_role', '')}"
+        )
         entry = search_for_character(
             obj_id=obj.get("id", "obj_0"),
-            label=obj.get("label", ""),
+            label=query_text,
             story_role=obj.get("story_role", ""),
-            geometry_function=obj.get("geometry_function", "make_robot"),
+            geometry_function=obj.get("geometry_function", ""),
             lvis=lvis,
             model=model, preprocess=preprocess, tokenizer=tokenizer,
             device=device,

@@ -26,10 +26,6 @@ from PIL import Image
 from qwen_vl_utils import process_vision_info
 from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
-# Load geometry catalog from blender/ directory
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "blender"))
-from geometry_catalog import CATALOG, catalog_for_prompt  # noqa: E402
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Qwen2.5-VL story planner")
@@ -95,17 +91,13 @@ Annotated keyframes use colour overlays:
   CYAN  = safe air / open space — floating characters
 
 RULES:
-1. Each character MUST use a DIFFERENT zone and a DIFFERENT route.
-   Two characters with the same path is wrong.
-2. ground characters: screen_path y >= 0.70 (lower = walkway level)
-   air characters:    screen_path y 0.30-0.60 (upper = above crowd)
-3. Use different x-ranges for each character so they don't overlap.
-4. geometry_function MUST be chosen from the catalog by semantic fit:
-   - An animal/creature → make_kitsune_fox (quadruped wireframe)
-   - A floating orb/drone/light → make_lantern_drone
-   - A humanoid robot → make_robot
-   - A flat holographic display/billboard → make_hologram_panel
-   A 'holographic fox' is still a fox (make_kitsune_fox), not a panel.
+1. Invent characters that genuinely fit THIS scene — its location, culture,
+   atmosphere, time of day. Do NOT default to generic robots or foxes.
+   Think: what would surprise and delight someone watching this specific video?
+2. Each character MUST use a DIFFERENT zone and a DIFFERENT route.
+3. ground characters: screen_path y >= 0.70 (lower frame = walkway level)
+   air characters:    screen_path y 0.30-0.60 (upper frame = above crowd)
+4. Use different x-ranges for each character so they don't overlap.
 5. Return ONLY valid JSON. No markdown, no extra keys.
 """
 
@@ -114,19 +106,19 @@ RULES:
         "objects": [
             {
                 "id": "obj_0",
-                "label": "vivid name e.g. 'amber lantern drone' or 'wireframe kitsune spirit'",
-                "story_role": "what this character does in the scene",
+                "label": "vivid, specific name rooted in the scene (e.g. 'neon torii gate spirit', 'salary-man ghost', 'paper crane flock', 'giant taiko drum rolling down the street')",
+                "story_role": "what this character does and why it belongs in this specific scene",
                 "placement": "ground | air",
-                "geometry_function": "make_lantern_drone | make_kitsune_fox | make_robot | make_hologram_panel",
+                "visual_description": "detailed description of what this character looks like — shape, material, colour, style",
                 "screen_path": [
-                    [0.10, 0.82], [0.25, 0.79], [0.38, 0.81], [0.50, 0.78]
+                    [0.10, 0.78], [0.25, 0.75], [0.38, 0.77], [0.50, 0.74]
                 ],
                 "appearance": {
                     "color_rgb": [1.0, 0.72, 0.2],
                     "emission_strength": 2.0,
                     "scale": 0.42
                 },
-                "action": "hover | walk | dance | spin | jump | orbit | pulse",
+                "action": "describe how this character moves — specific to its nature",
                 "action_frequency_seconds": 2.5
             }
         ]
@@ -137,13 +129,10 @@ RULES:
 SCENE CONTEXT:
 {json.dumps(scene_info, indent=2)}
 
-SPATIAL INSERTION GAPS (use different gaps for each character):
+SPATIAL INSERTION GAPS (assign each character to a different gap):
 {zones_text}
 
-AVAILABLE CGI GEOMETRY (render library — choose geometry_function from this list):
-{catalog_for_prompt()}
-
-Design 2-3 characters. Assign each to a DIFFERENT spatial zone.
+Design 2-3 characters. Be creative and scene-specific.
 Return JSON matching this schema:
 {json.dumps(schema, indent=2)}
 """
@@ -215,11 +204,9 @@ def _normalise(obj: dict, i: int, video: dict) -> dict:
         "emission_strength": app["emission_strength"],
     }
 
-    # Validate geometry_function against catalog
-    fn = obj.get("geometry_function", "")
-    if fn not in CATALOG:
-        # Let semantic dispatch handle it at render time
-        obj["geometry_function"] = ""
+    # geometry_function is NOT set by Qwen — the render dispatch uses CLIP
+    # similarity between visual_description and catalog at render time.
+    obj["geometry_function"] = ""
 
     # Clamp paths: ground objects stay low, air stays mid-frame
     raw_path = obj.get("screen_path", [[0.25, 0.78], [0.5, 0.75], [0.72, 0.77]])

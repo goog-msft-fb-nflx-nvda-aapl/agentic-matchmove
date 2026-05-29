@@ -433,14 +433,13 @@ def make_cgi_object(obj_def: dict, suffix: str = "") -> bpy.types.Object:
             return obj
         print("GLB import failed — falling back to semantic procedural dispatch")
 
-    # 2 — Semantic dispatch: story plan names the function, or CLIP picks it
-    fn_name = obj_def.get("geometry_function", "")
-    if fn_name and fn_name in _GEOMETRY_REGISTRY:
-        return _GEOMETRY_REGISTRY[fn_name](obj_def, suffix)
-
-    fn_name = _semantic_match(
-        f"{obj_def.get('label', '')} — {obj_def.get('story_role', '')}"
+    # 2 — Semantic CLIP dispatch against geometry catalog (no hardcoded keywords)
+    # Use visual_description if available (richer than label alone)
+    query = (
+        obj_def.get("visual_description")
+        or f"{obj_def.get('label', '')} — {obj_def.get('story_role', '')}"
     )
+    fn_name = _semantic_match(query)
     return _GEOMETRY_REGISTRY.get(fn_name, make_robot)(obj_def, suffix)
 
 
