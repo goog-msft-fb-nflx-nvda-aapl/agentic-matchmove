@@ -52,6 +52,8 @@ def main() -> int:
         context["scene_brief_path"] = str(scene_path)
         context["scene_summary"] = scene.get("scene_summary", {})
         context["vlm_scene_understanding"] = scene.get("vlm_scene_understanding", {})
+        if "first_cgi_concept" in scene:
+            context["first_cgi_concept"] = scene["first_cgi_concept"]
 
     context.setdefault("notes", []).append(
         "Merged Qwen2.5-VL scene understanding, Grounding DINO detections, and SAM2 masks."
