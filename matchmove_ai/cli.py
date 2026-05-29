@@ -55,10 +55,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "story":
-        script = Path(__file__).resolve().parent.parent / "scripts" / "llm_story_planner.py"
+        script = Path(__file__).resolve().parent.parent / "scripts" / "qwen_story_planner.py"
         cmd = ["python3", str(script), "--workdir", str(workdir), "--model", args.model]
-        if args.api_key:
-            cmd += ["--api-key", args.api_key]
         subprocess.run(cmd, check=True)
         return 0
 
