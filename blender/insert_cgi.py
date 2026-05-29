@@ -113,14 +113,28 @@ def apply_sfm_camera_motion(camera: bpy.types.Object, plan: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def make_material(name: str, color: list[float], emission_strength: float) -> bpy.types.Material:
+    """Pure Emission shader — reliable bright glow in EEVEE and Cycles."""
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    tree = mat.node_tree
+    tree.nodes.clear()
+    emit = tree.nodes.new("ShaderNodeEmission")
+    emit.inputs["Color"].default_value = (*color[:3], 1.0)
+    emit.inputs["Strength"].default_value = max(emission_strength, 1.5)
+    out = tree.nodes.new("ShaderNodeOutputMaterial")
+    tree.links.new(emit.outputs["Emission"], out.inputs["Surface"])
+    return mat
+
+
+def make_material_dark(name: str, color: list[float]) -> bpy.types.Material:
+    """Dark diffuse for non-emissive parts (eyes, joints, chains)."""
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
     if bsdf:
         bsdf.inputs["Base Color"].default_value = (*color[:3], 1.0)
-        bsdf.inputs["Emission Color"].default_value = (*color[:3], 1.0)
-        bsdf.inputs["Emission Strength"].default_value = emission_strength
-        bsdf.inputs["Roughness"].default_value = 0.38
+        bsdf.inputs["Roughness"].default_value = 0.9
+        bsdf.inputs["Metallic"].default_value = 0.0
     return mat
 
 
@@ -131,7 +145,7 @@ def make_material(name: str, color: list[float], emission_strength: float) -> bp
 def make_robot(obj_def: dict, suffix: str = "") -> bpy.types.Object:
     app = obj_def["appearance"]
     mat = make_material(f"robot_glow{suffix}", app["color"], app["emission_strength"])
-    dark = make_material(f"robot_dark{suffix}", [0.03, 0.035, 0.04], 0.0)
+    dark = make_material_dark(f"robot_dark{suffix}", [0.03, 0.035, 0.04])
 
     bpy.ops.mesh.primitive_uv_sphere_add(segments=24, ring_count=12, radius=0.55, location=(0, 0, 0.9))
     body = bpy.context.object
@@ -202,7 +216,7 @@ def make_lantern_drone(obj_def: dict, suffix: str = "") -> bpy.types.Object:
     cap.data.materials.append(mat)
     cap.parent = body
 
-    chain_mat = make_material(f"lantern_chain{suffix}", [0.12, 0.10, 0.08], 0.0)
+    chain_mat = make_material_dark(f"lantern_chain{suffix}", [0.12, 0.10, 0.08])
     for i, z in enumerate([0.52, 0.42, 0.34]):
         bpy.ops.mesh.primitive_torus_add(major_radius=0.045, minor_radius=0.012,
                                           major_segments=12, minor_segments=6,
@@ -220,24 +234,40 @@ def make_hologram_panel(obj_def: dict, suffix: str = "") -> bpy.types.Object:
     app = obj_def["appearance"]
     color = app["color"]
     emission = app["emission_strength"]
-    mat = make_material(f"hologram_emit{suffix}", color, emission * 2.2)
 
+    # Main panel — solid bright emission, NO transparency (BLEND breaks in EEVEE)
+    mat = make_material(f"hologram_emit{suffix}", color, emission * 3.0)
     bpy.ops.mesh.primitive_plane_add(size=1.0, location=(0, 0, 1.3))
     panel = bpy.context.object
     panel.name = f"CGI_hologram_panel{suffix}"
-    panel.scale = (1.4, 0.01, 0.9)
+    panel.scale = (1.8, 0.02, 1.1)
     panel.rotation_euler = (math.radians(90), 0, 0)
     panel.data.materials.append(mat)
 
-    scan_mat = make_material(f"hologram_scan{suffix}", [c * 0.25 for c in color[:3]], emission * 0.5)
-    for z_off in (-0.28, -0.09, 0.09, 0.28):
-        bpy.ops.mesh.primitive_plane_add(size=1.0, location=(0, -0.007, 1.3 + z_off))
+    # Bright scan lines in contrasting colour
+    contrast = [1.0 - c for c in color[:3]]
+    scan_mat = make_material(f"hologram_scan{suffix}", contrast, emission * 2.0)
+    for z_off in (-0.32, -0.11, 0.11, 0.32):
+        bpy.ops.mesh.primitive_plane_add(size=1.0, location=(0, -0.015, 1.3 + z_off))
         strip = bpy.context.object
         strip.name = f"CGI_scan_strip{suffix}"
-        strip.scale = (1.35, 0.01, 0.032)
+        strip.scale = (1.7, 0.02, 0.04)
         strip.rotation_euler = (math.radians(90), 0, 0)
         strip.data.materials.append(scan_mat)
         strip.parent = panel
+
+    # Glowing border frame
+    frame_mat = make_material(f"hologram_frame{suffix}", color, emission * 4.0)
+    for fx, fz, sw, sh in [
+        (0, 0.56, 1.9, 0.06), (0, -0.56, 1.9, 0.06),   # top/bottom bars
+        (-0.95, 0, 0.06, 1.18), (0.95, 0, 0.06, 1.18),  # left/right bars
+    ]:
+        bpy.ops.mesh.primitive_plane_add(size=1.0, location=(fx, -0.02, 1.3 + fz))
+        edge = bpy.context.object
+        edge.scale = (sw, 0.02, sh)
+        edge.rotation_euler = (math.radians(90), 0, 0)
+        edge.data.materials.append(frame_mat)
+        edge.parent = panel
 
     return panel
 
@@ -296,41 +326,44 @@ def animate_object(obj: bpy.types.Object, obj_def: dict, frame_start: int, frame
 # ---------------------------------------------------------------------------
 
 def add_lighting_and_shadow() -> None:
-    bpy.ops.mesh.primitive_plane_add(size=14, location=(0, 0, 0))
-    plane = bpy.context.object
-    plane.name = "shadow_catcher_floor"
-    mat = bpy.data.materials.new("matte_shadow_floor")
-    mat.diffuse_color = (0.55, 0.55, 0.55, 1)
-    plane.data.materials.append(mat)
-    plane.is_shadow_catcher = True
-
-    bpy.ops.object.light_add(type="AREA", location=(-3.5, -4.0, 5.5))
-    key = bpy.context.object
-    key.name = "soft_key_light"
-    key.data.energy = 600
-    key.data.size = 5.0
-
-    bpy.ops.object.light_add(type="POINT", location=(2.5, -2.0, 2.4))
-    fill = bpy.context.object
-    fill.name = "fill_light"
-    fill.data.energy = 90
+    # No shadow catcher floor — it renders as opaque grey in EEVEE,
+    # blocking the video background in the lower half of the frame.
+    # Emissive objects don't need a catcher for a convincing glow.
+    bpy.ops.object.light_add(type="SUN", location=(0, 0, 10))
+    sun = bpy.context.object
+    sun.name = "sun_light"
+    sun.data.energy = 3.0
+    sun.rotation_euler = (math.radians(45), 0, math.radians(30))
 
 
 def setup_compositor(video_path: str) -> None:
     scene = bpy.context.scene
-    scene.render.film_transparent = True
+    scene.render.film_transparent = True  # CGI renders on transparent bg
     scene.use_nodes = True
     tree = scene.node_tree
     tree.nodes.clear()
 
+    # Background: the original video fills every pixel
     movie = tree.nodes.new("CompositorNodeMovieClip")
     movie.clip = bpy.data.movieclips.load(video_path)
+
+    # CGI render layer (transparent where no object)
     render = tree.nodes.new("CompositorNodeRLayers")
+
+    # Bloom/glare on the CGI to make emissive objects glow visibly
+    glare = tree.nodes.new("CompositorNodeGlare")
+    glare.glare_type = "BLOOM"
+    glare.quality = "MEDIUM"
+    glare.threshold = 0.5
+    glare.size = 7
+
+    # Composite CGI over video
     alpha = tree.nodes.new("CompositorNodeAlphaOver")
     comp = tree.nodes.new("CompositorNodeComposite")
 
-    tree.links.new(movie.outputs["Image"], alpha.inputs[1])
-    tree.links.new(render.outputs["Image"], alpha.inputs[2])
+    tree.links.new(render.outputs["Image"], glare.inputs["Image"])
+    tree.links.new(movie.outputs["Image"], alpha.inputs[1])   # background
+    tree.links.new(glare.outputs["Image"], alpha.inputs[2])   # CGI + bloom
     tree.links.new(alpha.outputs["Image"], comp.inputs["Image"])
 
 
