@@ -227,16 +227,28 @@ def main() -> int:
         obj["scale"] = app.get("scale", 0.38)
         obj.setdefault("screen_path", [[0.2, 0.8], [0.45, 0.75], [0.7, 0.78]])
 
-        # Map action + shape to an asset type insert_cgi.py understands
-        action = obj.get("action", "walk")
-        shape = app.get("shape", "combined")
+        # Map to asset type — check character semantics BEFORE checking "holo" prefix
+        label_lower = obj.get("label", "").lower()
         placement = obj.get("placement", "ground")
-        if placement == "air" or action in ("hover", "orbit", "pulse"):
+        action = obj.get("action", "walk")
+        character_keywords = ("fox", "kitsune", "wolf", "cat", "bear", "spirit", "creature",
+                              "robot", "android", "pikachu", "pokemon")
+        air_keywords = ("lantern", "drone", "orb", "balloon", "ufo")
+        panel_keywords = ("billboard", "panel", "sign", "display", "board")
+
+        if any(k in label_lower for k in character_keywords):
+            # Keep asset as-is; make_cgi_object will dispatch by label
+            obj["asset"] = "procedural_robot"
+        elif placement == "air" or any(k in label_lower for k in air_keywords):
             obj["asset"] = "lantern_drone"
-        elif "panel" in obj.get("label", "").lower() or "holo" in obj.get("label", "").lower():
+        elif any(k in label_lower for k in panel_keywords):
             obj["asset"] = "hologram_panel"
         else:
             obj["asset"] = "procedural_robot"
+
+        # Clamp screen_path y to keep objects in lower half where walkway is visible
+        path = obj.get("screen_path", [[0.25, 0.78], [0.5, 0.75], [0.72, 0.77]])
+        obj["screen_path"] = [[x, max(0.68, y)] for x, y in path]
 
     out_path = work / "story_plan.json"
     out_path.write_text(json.dumps(story, indent=2) + "\n", encoding="utf-8")

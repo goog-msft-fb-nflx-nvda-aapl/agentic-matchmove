@@ -272,8 +272,95 @@ def make_hologram_panel(obj_def: dict, suffix: str = "") -> bpy.types.Object:
     return panel
 
 
+def make_kitsune_fox(obj_def: dict, suffix: str = "") -> bpy.types.Object:
+    """Holographic wireframe kitsune: head + ears + body + tail, wireframe modifier for hologram look."""
+    app = obj_def["appearance"]
+    color = app["color"]
+    emission = app["emission_strength"]
+    mat = make_material(f"fox_glow{suffix}", color, emission * 2.5)
+    ear_mat = make_material(f"fox_ear{suffix}", [min(1.0, c * 1.4) for c in color], emission * 3.5)
+
+    def add_wireframe(obj: bpy.types.Object, t: float = 0.025) -> None:
+        mod = obj.modifiers.new("Wireframe", "WIREFRAME")
+        mod.thickness = t
+        mod.use_even_offset = True
+
+    # Body
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=10, radius=0.5, location=(0, 0, 0.65))
+    body = bpy.context.object
+    body.name = f"CGI_fox_body{suffix}"
+    body.scale = (0.65, 0.45, 0.80)
+    body.data.materials.append(mat)
+    add_wireframe(body, 0.022)
+
+    # Head
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=14, ring_count=10, radius=0.34, location=(0, -0.48, 1.22))
+    head = bpy.context.object
+    head.name = f"CGI_fox_head{suffix}"
+    head.scale = (0.9, 1.05, 0.85)
+    head.data.materials.append(mat)
+    add_wireframe(head, 0.020)
+    head.parent = body
+
+    # Snout
+    bpy.ops.mesh.primitive_cone_add(vertices=8, radius1=0.12, radius2=0.04, depth=0.28,
+                                     location=(0, -0.76, 1.14))
+    snout = bpy.context.object
+    snout.name = f"CGI_fox_snout{suffix}"
+    snout.rotation_euler = (math.radians(80), 0, 0)
+    snout.data.materials.append(mat)
+    add_wireframe(snout, 0.016)
+    snout.parent = body
+
+    # Pointed ears
+    for ex in (-0.20, 0.20):
+        bpy.ops.mesh.primitive_cone_add(vertices=6, radius1=0.10, radius2=0.01, depth=0.36,
+                                         location=(ex, -0.38, 1.48))
+        ear = bpy.context.object
+        ear.name = f"CGI_fox_ear{suffix}"
+        ear.rotation_euler = (math.radians(-12), 0, math.radians(-8 if ex < 0 else 8))
+        ear.data.materials.append(ear_mat)
+        add_wireframe(ear, 0.018)
+        ear.parent = body
+
+    # Tail (series of spheres curving upward)
+    for i, (tx, ty, tz, tr) in enumerate([
+        (0, 0.45, 0.30, 0.20), (0, 0.65, 0.55, 0.22),
+        (0, 0.72, 0.85, 0.21), (0, 0.60, 1.10, 0.18), (0, 0.38, 1.28, 0.14),
+    ]):
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=10, ring_count=8, radius=tr,
+                                              location=(tx, ty, tz))
+        seg = bpy.context.object
+        seg.name = f"CGI_fox_tail{i}{suffix}"
+        seg.data.materials.append(mat)
+        add_wireframe(seg, 0.018)
+        seg.parent = body
+
+    # Bright nose dot
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=8, ring_count=6, radius=0.055,
+                                          location=(0, -0.90, 1.12))
+    nose = bpy.context.object
+    nose.name = f"CGI_fox_nose{suffix}"
+    nose.data.materials.append(make_material(f"fox_nose{suffix}", [1.0, 0.3, 0.6], 6.0))
+    nose.parent = body
+
+    return body
+
+
 def make_cgi_object(obj_def: dict, suffix: str = "") -> bpy.types.Object:
+    """Dispatch based on label first (character semantics), then asset type."""
+    label = obj_def.get("label", "").lower()
     asset = obj_def.get("asset", "procedural_robot")
+
+    # Character-type labels override asset field — a "holographic fox" is a fox, not a panel
+    if any(k in label for k in ("fox", "kitsune", "wolf", "cat", "bear", "spirit", "creature")):
+        return make_kitsune_fox(obj_def, suffix)
+    if any(k in label for k in ("lantern", "drone", "orb", "balloon")):
+        return make_lantern_drone(obj_def, suffix)
+    if any(k in label for k in ("billboard", "panel", "sign", "display")) and "holo" in label:
+        return make_hologram_panel(obj_def, suffix)
+
+    # Fall back to asset field
     if asset == "lantern_drone":
         return make_lantern_drone(obj_def, suffix)
     if asset == "hologram_panel":
