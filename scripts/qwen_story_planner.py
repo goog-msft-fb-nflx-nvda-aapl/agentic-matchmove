@@ -56,17 +56,38 @@ def _parse_json(text: str) -> dict:
 
 
 def _named_zones(spatial_text: str) -> str:
-    """Extract insertion gap lines and format as named zones for the prompt."""
     zones = []
     for line in spatial_text.splitlines():
         if "x=[" in line and "wide)" in line:
             zones.append(f"  {line.strip()}")
     if not zones:
-        return "  (no specific gaps detected — use full lower frame y>=0.70)"
+        return "  (no specific gaps — use full lower frame y>=0.70)"
     return "\n".join(zones[:8])
 
 
-def _build_prompt(scene_brief: dict, spatial_text: str) -> str:
+def _obstacle_map(context: dict) -> str:
+    """
+    Build a compact per-timestamp obstacle map from detected bounding boxes.
+    Gives Qwen concrete positions to route around rather than abstract zones.
+    """
+    video_w = max(1, context.get("video", {}).get("width", 1))
+    video_h = max(1, context.get("video", {}).get("height", 1))
+    lines = []
+    for frame in context.get("frames", [])[:16]:  # cap at 16 frames
+        ts = frame.get("timestamp", 0.0)
+        obstacles = []
+        for inst in frame.get("instances", []):
+            label = inst.get("label", "?")
+            x1, y1, x2, y2 = inst.get("bbox_xyxy", [0, 0, 0, 0])
+            cx = round((x1 + x2) * 0.5 / video_w, 2)
+            cy = round((y1 + y2) * 0.5 / video_h, 2)
+            obstacles.append(f"{label}@({cx},{cy})")
+        if obstacles:
+            lines.append(f"  t={ts:.1f}s: {', '.join(obstacles[:6])}")
+    return "\n".join(lines) if lines else "  (no detections available)"
+
+
+def _build_prompt(scene_brief: dict, spatial_text: str, context: dict | None = None) -> str:
     summary = scene_brief.get("scene_summary", {})
     concept = scene_brief.get("first_cgi_concept", {})
     vlm = scene_brief.get("vlm_scene_understanding", {}).get("parsed_response", {})
@@ -126,15 +147,25 @@ RULES:
         ]
     }
 
+    obs_map = _obstacle_map(context) if context else "  (not available)"
+
     return f"""{system}
 
 SCENE CONTEXT:
 {json.dumps(scene_info, indent=2)}
 
-SPATIAL INSERTION GAPS (assign each character to a different gap):
+DETECTED OBSTACLES PER FRAME (normalized screen coords x,y — route AROUND these):
+{obs_map}
+
+SPATIAL INSERTION GAPS (safe ground regions at each timestamp):
 {zones_text}
 
-Design 2-3 characters. Be creative and scene-specific.
+Design 2-3 characters with DIFFERENT routes:
+- Different entry edges (left/right/top/bottom)
+- Different trajectories (diagonal, curved, approaching camera, retreating)
+- Routes must navigate around the obstacle positions shown above
+- Use 5-6 path points per character for more expressive motion
+
 Return JSON matching this schema:
 {json.dumps(schema, indent=2)}
 """
@@ -255,7 +286,8 @@ def main() -> int:
         device_map="auto", attn_implementation="sdpa",
     )
 
-    prompt = _build_prompt(scene_brief, spatial_text)
+    context = _load(work / "perception_context.json")
+    prompt = _build_prompt(scene_brief, spatial_text, context)
     content = [{"type": "image", "image": Image.open(p).convert("RGB")} for p in selected]
     content.append({"type": "text", "text": prompt})
     messages = [{"role": "user", "content": content}]
