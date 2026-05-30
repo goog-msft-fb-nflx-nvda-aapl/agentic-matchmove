@@ -142,8 +142,6 @@ def main() -> int:
             pose = img.cam_from_world()
             R = pose.rotation.matrix()
             t = pose.translation
-            for pt_id, _ in zip(img.point2D, img.points2D):
-                pass  # skip 2D points, project 3D directly
             # Project all 3D points through this camera
             pts_cam = (R @ all_pts.T).T + t  # Nx3
             valid = pts_cam[:, 2] > 0
