@@ -91,14 +91,16 @@ Annotated keyframes use colour overlays:
   CYAN  = safe air / open space — floating characters
 
 RULES:
-1. Invent characters that genuinely fit THIS scene — its location, culture,
+1. ALL OUTPUT TEXT MUST BE IN ENGLISH — label, story_role, visual_description,
+   narrative, action. No other language ever.
+2. Invent characters that genuinely fit THIS scene — its location, culture,
    atmosphere, time of day. Do NOT default to generic robots or foxes.
    Think: what would surprise and delight someone watching this specific video?
-2. Each character MUST use a DIFFERENT zone and a DIFFERENT route.
-3. ground characters: screen_path y >= 0.70 (lower frame = walkway level)
+3. Each character MUST use a DIFFERENT zone and a DIFFERENT route.
+4. ground characters: screen_path y >= 0.70 (lower frame = walkway level)
    air characters:    screen_path y 0.30-0.60 (upper frame = above crowd)
-4. Use different x-ranges for each character so they don't overlap.
-5. Return ONLY valid JSON. No markdown, no extra keys.
+5. Use different x-ranges for each character so they don't overlap.
+6. Return ONLY valid JSON. No markdown, no extra keys.
 """
 
     schema = {
@@ -197,7 +199,8 @@ def _normalise(obj: dict, i: int, video: dict) -> dict:
     app.setdefault("color", [0.9, 0.75, 0.2])
     app.setdefault("emission_strength", 2.0)
     app.setdefault("scale", 0.40)
-    obj["scale"] = app["scale"]
+    # Minimum visible scale — below 0.8 world units objects are too small to see
+    obj["scale"] = max(0.8, app["scale"])
     # Flatten appearance for insert_cgi.py
     obj["appearance"] = {
         "color": app["color"],
@@ -220,7 +223,7 @@ def _normalise(obj: dict, i: int, video: dict) -> dict:
     duration = float(video.get("duration_seconds", 10.0))
     obj.setdefault("animation", {})["duration_seconds"] = duration
     obj["animation"]["screen_path"] = obj["screen_path"]
-    obj["animation"]["scale"] = obj["scale"]
+    obj["animation"]["scale"] = obj["scale"]  # already clamped to >= 0.8
     obj["animation"]["rotation_turns"] = 1.0
 
     return obj

@@ -108,35 +108,44 @@ def download_glbs(uids: list[str], dest: Path) -> dict[str, Path]:
     return result
 
 
-def rerank_by_thumbnail(
+def rank_by_annotations(
     uid_paths: dict[str, Path], query: str,
-    model, preprocess, tokenizer, device: str
+    model, tokenizer, device: str,
 ) -> list[tuple[str, Path, float]]:
     """
-    Re-rank candidates by CLIP image-text similarity using Objaverse renders.
-    Falls back to text-only ordering if no render is found.
+    Rank candidates by CLIP text similarity between the query and each
+    object's Objaverse annotation (name + tags).
+
+    This replaces the thumbnail re-rank which required pre-rendered images
+    that aren't reliably available. Text-to-text annotation ranking gives
+    meaningful signal within a category without any image downloads.
     """
     import objaverse
-    scored: list[tuple[str, Path, float]] = []
-    q_emb = embed_texts([query], model, tokenizer, device)
 
-    # Try to load thumbnail renders from Objaverse (rendered views dataset)
     try:
-        renders = objaverse.load_renderings(list(uid_paths.keys()), download_processes=2)
+        annotations = objaverse.load_annotations(list(uid_paths.keys()))
     except Exception:
-        renders = {}
+        annotations = {}
+
+    q_emb = embed_texts([query], model, tokenizer, device)
+    scored: list[tuple[str, Path, float]] = []
 
     for uid, glb_path in uid_paths.items():
-        if uid in renders and renders[uid]:
-            thumb_paths = [Path(p) for p in renders[uid][:4] if Path(p).exists()]
-            if thumb_paths:
-                img_embs = embed_images(thumb_paths, model, preprocess, device)
-                score = float((q_emb @ img_embs.T).max())
-            else:
-                score = 0.5  # no render available
+        ann = annotations.get(uid, {}) or {}
+        name = ann.get("name", "")
+        tags = ann.get("tags", [])
+        # tags can be list of strings or list of dicts {"name": ...}
+        tag_strs = [t["name"] if isinstance(t, dict) else str(t) for t in tags[:12]]
+        ann_text = f"{name} {' '.join(tag_strs)}".strip()
+
+        if ann_text:
+            ann_emb = embed_texts([ann_text], model, tokenizer, device)
+            score = float((q_emb @ ann_emb.T).squeeze())
         else:
-            score = 0.5
+            score = 0.0
+
         scored.append((uid, glb_path, score))
+        print(f"    {uid[:8]}… name='{name}' score={score:.3f}")
 
     scored.sort(key=lambda x: x[2], reverse=True)
     return scored
@@ -148,7 +157,7 @@ def rerank_by_thumbnail(
 
 def search_for_character(
     obj_id: str, label: str, story_role: str, geometry_function: str,
-    lvis: dict[str, list[str]], model, preprocess, tokenizer, device: str,
+    lvis: dict[str, list[str]], model, tokenizer, device: str,
     top_cats: int, per_cat: int, asset_dir: Path,
 ) -> dict:
     """Find the best GLB for one story character. Returns manifest entry."""
@@ -185,8 +194,8 @@ def search_for_character(
             "fallback": geometry_function,
         }
 
-    # Stage 4 — re-rank by thumbnail CLIP similarity
-    ranked = rerank_by_thumbnail(uid_paths, query, model, preprocess, tokenizer, device)
+    # Stage 4 — rank by Objaverse annotation text (name + tags) via CLIP
+    ranked = rank_by_annotations(uid_paths, query, model, tokenizer, device)
     best_uid, best_path, best_score = ranked[0]
     print(f"  Best match: uid={best_uid} score={best_score:.3f} → {best_path.name}")
 
@@ -240,7 +249,7 @@ def main() -> int:
             story_role=obj.get("story_role", ""),
             geometry_function=obj.get("geometry_function", ""),
             lvis=lvis,
-            model=model, preprocess=preprocess, tokenizer=tokenizer,
+            model=model, tokenizer=tokenizer,
             device=device,
             top_cats=args.top_cats,
             per_cat=args.per_cat,
